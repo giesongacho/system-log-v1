@@ -1,0 +1,28 @@
+# Xcode
+*.xcodeproj/*
+!*.xcodeproj/project.pbxproj
+!*.xcodeproj/xcshareddata/
+!*.xcodeproj/project.xcworkspace/
+*.xcodeproj/project.xcworkspace/xcuserdata/
+*.xcworkspace/xcuserdata/
+
+# Build generated
+build/
+DerivedData/
+
+# Various settings
+*.pbxuser
+*.mode1v3
+*.mode2v3
+*.perspectivev3
+xcuserdata/
+
+# Swift specific
+*.hmap
+*.ipa
+*.dSYM.zip
+*.dSYM
+
+# Mac
+.DS_Store
+
