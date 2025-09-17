@@ -6,9 +6,9 @@ import IOKit.storage
 import IOKit.network
 import SystemConfiguration
 
-// MARK: - Logger Configuration
+// MARK: - Logger Configuration (System-wide)
 struct LoggerConfig {
-    static let logDirectory = FileManager.default.homeDirectoryForCurrentUser.appendingPathComponent("SystemLogs")
+    static let logDirectory = URL(fileURLWithPath: "/var/log/systemlog")
     static let logFileName = "system.log"
     static var logFilePath: URL { logDirectory.appendingPathComponent(logFileName) }
 }
@@ -100,7 +100,7 @@ struct USBDeviceDetails: Codable {
 
 struct AudioDeviceDetails: Codable {
     let name: String
-    let type: String // "input" or "output"
+    let type: String
     let isDefault: Bool
 }
 
@@ -178,8 +178,30 @@ class EnhancedHardwareMonitor {
             print("Initial hardware setup failed: \(error.localizedDescription)")
         }
     }
+    
+    // MARK: - Current User Detection
+    func getCurrentUser() -> String {
+        let process = Process()
+        process.launchPath = "/usr/bin/stat"
+        process.arguments = ["-f", "%Su", "/dev/console"]
+        let pipe = Pipe()
+        process.standardOutput = pipe
+        
+        do {
+            try process.run()
+            process.waitUntilExit()
+            let data = pipe.fileHandleForReading.readDataToEndOfFile()
+            if let output = String(data: data, encoding: .utf8) {
+                let user = output.trimmingCharacters(in: .whitespacesAndNewlines)
+                return user.isEmpty ? "unknown" : user
+            }
+        } catch {
+            print("Error getting current user: \(error)")
+        }
+        
+        return "unknown"
+    }
 
-    // MARK: - System Usage Collection
     func getCurrentSystemUsage() -> SystemUsage {
         let memoryUsage = getMemoryUsage()
         let storageUsage = getStorageUsage()
@@ -288,7 +310,7 @@ class EnhancedHardwareMonitor {
                         usedGB: deviceUsed,
                         freeGB: deviceFree,
                         usagePercentage: usage,
-                        fileSystem: "APFS", // Default for macOS
+                        fileSystem: "APFS",
                         mountPoint: mountPoint
                     ))
                     
@@ -372,7 +394,7 @@ class EnhancedHardwareMonitor {
                         macAddress: macAddress,
                         ipAddress: ipAddress,
                         speed: getInterfaceSpeed(interfaceName),
-                        bytesReceived: nil, // Can be enhanced with netstat data
+                        bytesReceived: nil,
                         bytesSent: nil
                     ))
                 }
@@ -392,7 +414,7 @@ class EnhancedHardwareMonitor {
                 vendorID: device.vendorID,
                 productID: device.productID,
                 serialNumber: device.serialNumber,
-                speed: nil, // Can be enhanced with IOKit speed detection
+                speed: nil,
                 power: nil
             )
         }
@@ -404,7 +426,7 @@ class EnhancedHardwareMonitor {
             AudioDeviceDetails(
                 name: device.name,
                 type: device.isInput ? "input" : "output",
-                isDefault: false // Can be enhanced with default device detection
+                isDefault: false
             )
         }
     }
@@ -415,7 +437,7 @@ class EnhancedHardwareMonitor {
             DisplayDeviceDetails(
                 name: display.name,
                 resolution: display.resolution,
-                refreshRate: nil, // Can be enhanced with refresh rate detection
+                refreshRate: nil,
                 colorDepth: nil,
                 isMain: display.isMain
             )
@@ -431,7 +453,6 @@ class EnhancedHardwareMonitor {
         )
     }
 
-    // MARK: - Helper Methods
     func extractNumber(_ line: String) -> Double {
         line.components(separatedBy: .whitespaces).compactMap { Double($0) }.first ?? 0
     }
@@ -452,8 +473,7 @@ class EnhancedHardwareMonitor {
     }
 
     func getMemoryPressure() -> String {
-        // Simplified memory pressure detection
-        return "normal" // Can be enhanced with actual pressure monitoring
+        return "normal"
     }
 
     func getLoadAverage() -> LoadAverage {
@@ -481,12 +501,10 @@ class EnhancedHardwareMonitor {
     }
 
     func getCurrentCPUUsage() -> Double {
-        // Simplified CPU usage - can be enhanced with more detailed monitoring
         return 0.0
     }
 
     func getInterfaceSpeed(_ name: String) -> String? {
-        // Can be enhanced with actual speed detection
         return nil
     }
 
@@ -509,7 +527,6 @@ class EnhancedHardwareMonitor {
         return formatter.string(from: bootTime)
     }
 
-    // MARK: - Existing Hardware Change Detection Methods
     func checkAllHardwareChanges() -> [String] {
         var changes: [String] = []
         changes.append(contentsOf: checkBasicHardwareChanges())
@@ -650,7 +667,6 @@ class EnhancedHardwareMonitor {
         return changes
     }
 
-    // MARK: - Hardware Detection Methods (existing code)
     func getUSBDevices() -> [USBDevice] {
         var devices: [USBDevice] = []
         
@@ -891,13 +907,13 @@ class EnhancedHardwareMonitor {
     }
 }
 
-// MARK: - Enhanced System Logger
+// MARK: - Enhanced System Logger (Multi-User)
 class EnhancedSystemLogger {
     private let dateFormatter: DateFormatter = { let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd HH:mm:ss"; return df }()
     private let isoFormatter: DateFormatter = { let df = DateFormatter(); df.dateFormat = "yyyy-MM-dd'T'HH:mm:ss'Z'"; df.timeZone = TimeZone(abbreviation: "UTC"); return df }()
     private var isInitialized = false
     private let hardwareMonitor = EnhancedHardwareMonitor()
-    private let n8nWebhookURL = URL(string: "http://localhost:5678/webhook-test/system-log")
+    private let n8nWebhookURL = URL(string: "https://n8n.srv470812.hstgr.cloud/webhook/system-log")
 
     init() {
         do {
@@ -913,15 +929,15 @@ class EnhancedSystemLogger {
 
     func log(_ message: String, level: LogLevel = .info) {
         let timestamp = dateFormatter.string(from: Date())
-        let entry = "[\(timestamp)] [\(level.rawValue)] \(message)"
+        let currentUser = hardwareMonitor.getCurrentUser()
+        let entry = "[\(timestamp)] [\(level.rawValue)] [User: \(currentUser)] \(message)"
         print(entry)
         
         if isInitialized {
             writeToLogFile(entry)
         }
         
-        // Send individual change events to n8n
-        sendEventToN8n(message: message, level: level)
+        sendEventToN8n(message: message, level: level, currentUser: currentUser)
     }
 
     private func writeToLogFile(_ entry: String) {
@@ -944,39 +960,50 @@ class EnhancedSystemLogger {
         }
     }
 
-    private func sendEventToN8n(message: String, level: LogLevel) {
+    // UPDATED: Multi-user webhook with current user detection
+    private func sendEventToN8n(message: String, level: LogLevel, currentUser: String) {
         guard let url = n8nWebhookURL else { return }
         
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
         request.setValue("application/json", forHTTPHeaderField: "Content-Type")
         
-        // Get current system usage
-        let systemUsage = hardwareMonitor.getCurrentSystemUsage()
-        
-        let payload: [String: Any] = [
-            "timestamp": isoFormatter.string(from: Date()),
-            "level": level.rawValue,
-            "message": message,
-            "macbook_user": "devteam",
-            "event_type": "hardware_change",
-            "hostname": ProcessInfo.processInfo.hostName,
-            "system_usage": try! JSONSerialization.jsonObject(with: JSONEncoder().encode(systemUsage))
-        ]
-        
         do {
-            request.httpBody = try JSONSerialization.data(withJSONObject: payload)
-            URLSession.shared.dataTask(with: request) { data, response, error in
+            let systemUsage = hardwareMonitor.getCurrentSystemUsage()
+            
+            // Properly encode systemUsage to dictionary
+            let encoder = JSONEncoder()
+            let systemData = try encoder.encode(systemUsage)
+            guard var systemDict = try JSONSerialization.jsonObject(with: systemData) as? [String: Any] else {
+                print("n8n error: Failed to convert system data to dictionary")
+                return
+            }
+            
+            // Add metadata fields with current user detection
+            systemDict["timestamp"] = isoFormatter.string(from: Date())
+            systemDict["level"] = level.rawValue
+            systemDict["message"] = message
+            systemDict["macbook_user"] = "system"  // System-wide deployment
+            systemDict["current_user"] = currentUser  // Currently logged in user
+            systemDict["event_type"] = "hardware_change"
+            systemDict["hostname"] = ProcessInfo.processInfo.hostName
+            
+            request.httpBody = try JSONSerialization.data(withJSONObject: systemDict)
+            
+            let task = URLSession.shared.dataTask(with: request) { data, response, error in
                 if let error = error {
                     print("n8n error: \(error.localizedDescription)")
                 } else if let httpResponse = response as? HTTPURLResponse {
+                    print("n8n response: \(httpResponse.statusCode)")
                     if httpResponse.statusCode == 200 {
-                        print("n8n success: \(level.rawValue) event sent")
-                    } else {
-                        print("n8n status: \(httpResponse.statusCode)")
+                        print("n8n success: \(level.rawValue) event sent for user \(currentUser)")
+                    } else if let data = data, let responseBody = String(data: data, encoding: .utf8) {
+                        print("n8n response body: \(responseBody)")
                     }
                 }
-            }.resume()
+            }
+            task.resume()
+            
         } catch {
             print("n8n JSON error: \(error.localizedDescription)")
         }
@@ -1017,4 +1044,4 @@ class EnhancedSystemLogger {
 
 // MARK: - Main
 let logger = EnhancedSystemLogger()
-logger.startMonitoring(interval: 60.0)
+logger.startMonitoring(interval: 30.0)
